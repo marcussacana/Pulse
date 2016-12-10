@@ -1,4 +1,4 @@
-using System;
+п»їusing System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -12,10 +12,7 @@ namespace Pulse.UI
     {
         public static bool ReplaceAnimatedText = false;
 
-        public string SourceExtension
-        {
-            get { return ".strings"; }
-        }
+        public string SourceExtension => ".strings";
 
         public bool TryInject(IUiInjectionSource source, string sourceFullPath, ArchiveEntryInjectionData data, ArchiveEntry entry)
         {
@@ -34,11 +31,7 @@ namespace Pulse.UI
                 }
             }
 
-            MemoryInjectionSource memorySource = source as MemoryInjectionSource;
-            if (memorySource == null)
-                return false;
-
-            sourceEntries = memorySource.TryProvideStrings();
+            sourceEntries = source.TryProvideStrings();
             if (sourceEntries == null)
                 return false;
 
@@ -50,16 +43,23 @@ namespace Pulse.UI
 
         private void Inject(ArchiveListing listing, ArchiveEntry entry, Dictionary<String, String> sourceEntries, Stream output)
         {
+            ZtrFileType type = ZtrFileType.LittleEndianUncompressedDictionary;
             ZtrFileEntry[] targetEntries;
             using (Stream original = listing.Accessor.ExtractBinary(entry))
             {
                 ZtrFileUnpacker unpacker = new ZtrFileUnpacker(original, InteractionService.TextEncoding.Provide().Encoding);
                 targetEntries = unpacker.Unpack();
+
+                if (InteractionService.GamePart == FFXIIIGamePart.Part2)
+                {
+                    if (entry.Name.StartsWith("txtres/resident/system/txtres_", StringComparison.InvariantCultureIgnoreCase))
+                        type = ZtrFileType.BigEndianCompressedDictionary;
+                }
             }
 
             MergeEntries(sourceEntries, targetEntries);
 
-            ZtrFilePacker packer = new ZtrFilePacker(output, InteractionService.TextEncoding.Provide().Encoding);
+            ZtrFilePacker packer = new ZtrFilePacker(output, InteractionService.TextEncoding.Provide().Encoding, type);
             packer.Pack(targetEntries);
         }
 
@@ -72,7 +72,7 @@ namespace Pulse.UI
                 string newText;
                 if (!newEntries.TryGetValue(entry.Key, out newText))
                 {
-                    Log.Warning("[ArchiveEntryInjectorStringsToZtr] Пропущена неизвестная запись {0}={1}.", entry.Key, entry.Value);
+                    Log.Warning("[ArchiveEntryInjectorStringsToZtr] Unknown entry was skipped {0}={1}.", entry.Key, entry.Value);
                     continue;
                 }
 
@@ -86,7 +86,7 @@ namespace Pulse.UI
                 int newLength = newText.Length - endingLength;
                 sb.Clear();
 
-                // Восстановление старых хвостов и тегов новой строки
+                // Restore an old tails and new line tags
                 bool cr = false;
                 for (int i = 0; i < newLength; i++)
                 {
@@ -188,7 +188,7 @@ namespace Pulse.UI
             }
 
             if (left != 0)
-                Log.Warning("[ArchiveEntryInjectorStringsToZtr.GetEndingTags] Неверная управляющая последовательность: {0}", text);
+                Log.Warning("[ArchiveEntryInjectorStringsToZtr.GetEndingTags] Unexpected escape sequence: {0}", text);
 
             return result;
         }
@@ -222,6 +222,9 @@ namespace Pulse.UI
             {"$btl_mtxt_09", "SUMMON"},
             {"$btl_mtxt_10", "PARADIGM SHIFT"},
 
+            {"$target", "TARGET"},
+            {"$pre_mtxt_01" ,"PREEMPTIVE STRIKE!"},
+
             {"$f_abi_mtxt_00", "ABILITIES"},
             {"$f_abi_mtxt_01", "ABILITY"},
             {"$f_abi_mtxt_02", "ATB Cost"},
@@ -240,6 +243,7 @@ namespace Pulse.UI
 
             {"$libra_00", "LEVEL"},
             {"$pause_00", "PAUSED"},
+            {"$tutorial_00", "TUTORIAL"},
 
             {"$m_atcl_chpt00", "CHAPTER"},
             {"$m_atcl_head00", "LOG ENTRY"},
@@ -280,6 +284,9 @@ namespace Pulse.UI
             {"$resms_txt00", "MISSION COMPLETE!"},
             {"$resms_txt01", "MISSION RESULTS"},
 
+            {"$role_change", "PARADIGM SHIFT"},
+            {"$role_lv", "LEVEL"},
+
             {"$growth_00", "CRYSTARIUM EXPANDED!"},
             {"$growth_01", "ROLE DEVELOPMENT UNLOCKED!"},
 
@@ -289,7 +296,17 @@ namespace Pulse.UI
             {"$f_cus_def_02", "LEVEL IMPROVED"},
             {"$f_cus_def_03", "TYPE MODIFIED"},
 
-            {"$f_cus_mtxt_13", "EXP BONUS"},
+            {"$f_cus_mtxt_00", "INVENTORY"},
+            {"$f_cus_mtxt_01", "POWER"},
+            {"$f_cus_mtxt_02", "CUSTOMIZATION"},
+            {"$f_cus_mtxt_03", "BONUS:"},
+            {"$f_cus_mtxt_04", "EXP:"},
+            {"$f_cus_mtxt_06", "METHOD"},
+            {"$f_cus_mtxt_07", "WEAPONS"},
+            {"$f_cus_mtxt_08", "ACCESSORIES"},
+            {"$f_cus_mtxt_09", "COMPONENTS"},
+
+            {"$f_cus_mtxt_13", "EXP BONUS:"},
             {"$f_cus_mtxt_14", "NEXT BONUS!"},
 
             {"$f_cry_inf_01", "CRYSTARIUM"},
@@ -306,6 +323,10 @@ namespace Pulse.UI
             {"$f_mtxt_03", "CRYSTARIUM"},
             {"$f_mtxt_04", "TECHNICAL POINTS"},
 
+            {"$f_opt_mtxt_00", "PARADIGMS"},
+            {"$f_opt_mtxt_01", "ROLE LEVEL"},
+            {"$f_opt_mtxt_02", "ROLE BONUS"},
+            {"$f_opt_mtxt_03", "LV."},
             {"$f_opt_mtxt_04", "LEADER"},
             {"$f_opt_mtxt_05", "MEMBER"},
 

@@ -1,21 +1,23 @@
-using System;
+п»їusing System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
-using System.Windows.Media;
 using Microsoft.WindowsAPICodePack.Dialogs;
 using Pulse.Core;
 using Pulse.FS;
-using Pulse.OpenGL;
+using Pulse.DirectX;
+using SharpDX;
+using SharpDX.Toolkit.Graphics;
 using Xceed.Wpf.Toolkit.PropertyGrid;
 using Xceed.Wpf.Toolkit.PropertyGrid.Editors;
+using Color = System.Windows.Media.Color;
+using Device = SharpDX.Direct3D11.Device;
 
 // ReSharper disable UnusedMember.Local
 
@@ -25,7 +27,7 @@ namespace Pulse.UI
     {
         private readonly Tree _treeView;
         private readonly PropertyGrid _propertyGrid;
-        private readonly UiGlViewport _viewer;
+        private readonly UiDxViewport _viewer;
         private UiButton _rollbackButton;
         private UiButton _injectButton;
         private UiButton _saveAsButton;
@@ -46,10 +48,15 @@ namespace Pulse.UI
             _propertyGrid = new PropertyGrid {AutoGenerateProperties = true};
             AddUiElement(_propertyGrid, 0, 1);
 
-            _viewer = new UiGlViewport(Draw);
+            _viewer = new UiDxViewport
+            {
+                MinWidth = 320,
+                MinHeight = 240
+            };
+            _viewer.DrawSprites += DrawSprites;
             AddUiElement(_viewer, 1, 1);
 
-            _rollbackButton = UiButtonFactory.Create("Отменить");
+            _rollbackButton = UiButtonFactory.Create(Lang.Button.Rollback);
             {
                 _rollbackButton.Width = 200;
                 _rollbackButton.Margin = new Thickness(5);
@@ -59,7 +66,7 @@ namespace Pulse.UI
                 AddUiElement(_rollbackButton, 2, 0, 0, 2);
             }
 
-            _injectButton = UiButtonFactory.Create("Вставить");
+            _injectButton = UiButtonFactory.Create(Lang.Button.Inject);
             {
                 _injectButton.Width = 200;
                 _injectButton.Margin = new Thickness(5, 5, 210, 5);
@@ -69,7 +76,7 @@ namespace Pulse.UI
                 AddUiElement(_injectButton, 2, 0, 0, 2);
             }
 
-            _saveAsButton = UiButtonFactory.Create("Сохранить как...");
+            _saveAsButton = UiButtonFactory.Create(Lang.Button.SaveAs);
             {
                 _saveAsButton.Width = 200;
                 _saveAsButton.Margin = new Thickness(5);
@@ -85,7 +92,7 @@ namespace Pulse.UI
         private WpdArchiveListing _listing;
         private WpdEntry _entry;
         private YkdFile _ykdFile;
-        private Dictionary<string, GLTexture> _textures;
+        private Dictionary<string, DxTexture> _textures;
 
         public void Show(WpdArchiveListing listing, WpdEntry entry)
         {
@@ -94,7 +101,7 @@ namespace Pulse.UI
 
             if (_textures != null)
             {
-                foreach (GLTexture texture in _textures.Values)
+                foreach (DxTexture texture in _textures.Values)
                     texture.Dispose();
 
                 _textures = null;
@@ -113,72 +120,69 @@ namespace Pulse.UI
                     .Select(r => _listing.FirstOrDefault(e => e.NameWithoutExtension == r.Name))
                     .Distinct()
                     .Where(e => e != null)
-                    .ToDictionary(wpdEntry => wpdEntry.NameWithoutExtension, e => GLTextureReader.ReadFromWpd(listing, e));
+                    .ToDictionary(wpdEntry => wpdEntry.NameWithoutExtension, e => DxTextureReader.ReadFromWpd(listing, e));
 
                 _treeView.ItemsSource = new[] {new YkdFileView(_ykdFile)};
             }
 
             Visibility = Visibility.Visible;
-            _viewer.DrawEvent.Set();
+            _viewer.Refresh();
         }
 
         private int _w, _h;
 
-        private void Draw()
+        private void DrawSprites(Device device, SpriteBatch spriteBatch, Rectangle cliprectangle)
         {
             YkdFile file = _ykdFile;
             if (file == null)
                 return;
 
             int w = 0, h = 0;
-            using (_viewer.AcquireContext())
-            {
-                foreach (YkdResource resource in file.Resources.Resources)
-                {
-                    GLTexture texture = _textures.TryGetValue(resource.Name);
-                    if (texture == null)
-                        continue;
-
-                    DrawTexture(ref w, ref h, resource);
-                }
-            }
+            foreach (YkdResource resource in file.Resources.Resources)
+                DrawTexture(ref w, ref h, resource, device, spriteBatch, cliprectangle);
 
             if (_w != w || _h != h)
             {
                 _w = w;
                 _h = h;
-                GLService.SetViewportDesiredSize(_w, _h);
+                _viewer.SetDesiredSize(_w, _h);
             }
-
-            _viewer.SwapBuffers();
         }
 
-        private void DrawTexture(ref int w, ref int h, YkdResource resource)
+        private void DrawTexture(ref int w, ref int h, YkdResource resource, Device device, SpriteBatch spriteBatch, Rectangle cliprectangle)
         {
-            GLTexture texture = _textures.TryGetValue(resource.Name);
+            DxTexture texture = _textures.TryGetValue(resource.Name);
             if (texture == null)
                 return;
 
-            switch (resource.Viewport.Type)
+            spriteBatch.Begin();
+            try
             {
-                case YkdResourceViewportType.Fragment:
-                    FragmentYkdResourceViewport fragment = (FragmentYkdResourceViewport)resource.Viewport;
-                    texture.Draw(w, 0, 0, fragment.SourceX, fragment.SourceY, fragment.SourceWidth, fragment.SourceHeight);
-                    w += fragment.SourceWidth;
-                    h = Math.Max(h, fragment.SourceHeight);
-                    break;
-                case YkdResourceViewportType.Full:
-                    FullYkdResourceViewport full = (FullYkdResourceViewport)resource.Viewport;
-                    texture.Draw(w, 0, 0, 0, 0, full.ViewportWidth, full.ViewportHeight);
-                    w += full.ViewportWidth;
-                    h = Math.Max(h, full.ViewportHeight);
-                    break;
-                case YkdResourceViewportType.Extra:
-                    ExtraYkdResourceViewport extra = (ExtraYkdResourceViewport)resource.Viewport;
-                    texture.Draw(w, 0, 0, 0, 0, extra.SourceWidth, extra.SourceHeight);
-                    w += extra.SourceWidth;
-                    h = Math.Max(h, extra.SourceHeight);
-                    break;
+                switch (resource.Viewport.Type)
+                {
+                    case YkdResourceViewportType.Fragment:
+                        FragmentYkdResourceViewport fragment = (FragmentYkdResourceViewport)resource.Viewport;
+                        texture.Draw(device, spriteBatch, new Vector2(w, 0), new Rectangle(fragment.SourceX, fragment.SourceY, fragment.SourceWidth, fragment.SourceHeight), 1.0f, cliprectangle);
+                        w += fragment.SourceWidth;
+                        h = Math.Max(h, fragment.SourceHeight);
+                        break;
+                    case YkdResourceViewportType.Full:
+                        FullYkdResourceViewport full = (FullYkdResourceViewport)resource.Viewport;
+                        texture.Draw(device, spriteBatch, new Vector2(w, 0), new Rectangle(0, 0, full.ViewportWidth, full.ViewportHeight), 1.0f, cliprectangle);
+                        w += full.ViewportWidth;
+                        h = Math.Max(h, full.ViewportHeight);
+                        break;
+                    case YkdResourceViewportType.Extra:
+                        ExtraYkdResourceViewport extra = (ExtraYkdResourceViewport)resource.Viewport;
+                        texture.Draw(device, spriteBatch, new Vector2(w, 0), new Rectangle(0, 0, extra.SourceWidth, extra.SourceHeight), 1.0f, cliprectangle);
+                        w += extra.SourceWidth;
+                        h = Math.Max(h, extra.SourceHeight);
+                        break;
+                }
+            }
+            finally
+            {
+                spriteBatch.End();
             }
         }
 
@@ -230,7 +234,7 @@ namespace Pulse.UI
                     return;
 
                 String targetPath;
-                using (CommonSaveFileDialog dlg = new CommonSaveFileDialog("Сохранить как..."))
+                using (CommonSaveFileDialog dlg = new CommonSaveFileDialog(Lang.Dialogue.SaveAs.Title))
                 {
                     dlg.DefaultFileName = _entry.Name;
                     if (dlg.ShowDialog() != CommonFileDialogResult.Ok)
@@ -263,7 +267,7 @@ namespace Pulse.UI
                 public override DataTemplate SelectTemplate(object item, DependencyObject container)
                 {
                     View view = item as View;
-                    return view == null ? null : view.TreeViewTemplate;
+                    return view?.TreeViewTemplate;
                 }
             }
         }
@@ -275,17 +279,13 @@ namespace Pulse.UI
 
             // Binding
             [Browsable(false)]
-            public IEnumerable<View> BindableChilds
-            {
-                get { return EnumerateChilds(); }
-            }
+            public IEnumerable<View> BindableChilds => EnumerateChilds();
 
             protected abstract IEnumerable<View> EnumerateChilds();
 
-
             protected delegate Boolean StringToValueConverter<T>(String value, out T result);
 
-            protected String ReadArrayAsString<T>(T[] array, Func<T, String> valueToString)
+            private String ReadArrayAsString<T>(T[] array, Func<T, String> valueToString)
             {
                 if (array == null)
                     return null;
@@ -331,9 +331,7 @@ namespace Pulse.UI
 
             protected internal void RaisePropertyChanged(string propertyName)
             {
-                PropertyChangedEventHandler handler = PropertyChanged;
-                if (handler != null)
-                    handler(this, new PropertyChangedEventArgs(propertyName));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
             }
         }
 
@@ -377,7 +375,7 @@ namespace Pulse.UI
 
                 FrameworkElementFactory textBlock = new FrameworkElementFactory(typeof(TextBlock));
                 textBlock.SetBinding(TextBlock.TextProperty, new Binding("Title"));
-                textBlock.SetBinding(TextBlock.ContextMenuProperty, new Binding("ContextMenu"));
+                textBlock.SetBinding(ContextMenuProperty, new Binding("ContextMenu"));
 
                 template.VisualTree = textBlock;
                 return template;
@@ -404,9 +402,9 @@ namespace Pulse.UI
                 yield return new YkdResourcesView(Native.Resources);
             }
 
-            [Category("Заголовок")]
-            [DisplayName("Неизвестно 1")]
-            [Description("Неизвестное значение.")]
+            [Category("Р—Р°РіРѕР»РѕРІРѕРє")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 1")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int HeaderUnknown1
             {
@@ -414,9 +412,9 @@ namespace Pulse.UI
                 set { Native.Header.Unknown1 = value; }
             }
 
-            [Category("Заголовок")]
-            [DisplayName("Неизвестно 2")]
-            [Description("Неизвестное значение.")]
+            [Category("Р—Р°РіРѕР»РѕРІРѕРє")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 2")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(ByteUpDownEditor), typeof(ByteUpDownEditor))]
             public byte HeaderUnknown2
             {
@@ -424,9 +422,9 @@ namespace Pulse.UI
                 set { Native.Header.Unknown2 = value; }
             }
 
-            [Category("Заголовок")]
-            [DisplayName("Неизвестно 3")]
-            [Description("Неизвестное значение.")]
+            [Category("Р—Р°РіРѕР»РѕРІРѕРє")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 3")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(ByteUpDownEditor), typeof(ByteUpDownEditor))]
             public byte HeaderUnknown3
             {
@@ -434,9 +432,9 @@ namespace Pulse.UI
                 set { Native.Header.Unknown3 = value; }
             }
 
-            [Category("Заголовок")]
-            [DisplayName("Неизвестно 4")]
-            [Description("Неизвестное значение.")]
+            [Category("Р—Р°РіРѕР»РѕРІРѕРє")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 4")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(ByteUpDownEditor), typeof(ByteUpDownEditor))]
             public byte HeaderUnknown4
             {
@@ -444,9 +442,9 @@ namespace Pulse.UI
                 set { Native.Header.Unknown4 = value; }
             }
 
-            [Category("Заголовок")]
-            [DisplayName("Неизвестно 5")]
-            [Description("Неизвестное значение.")]
+            [Category("Р—Р°РіРѕР»РѕРІРѕРє")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 5")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(ByteUpDownEditor), typeof(ByteUpDownEditor))]
             public byte HeaderUnknown5
             {
@@ -454,10 +452,7 @@ namespace Pulse.UI
                 set { Native.Header.Unknown5 = value; }
             }
 
-            public override string Title
-            {
-                get { return String.Format("{0} (Count: {1})", base.Title, Native.Blocks.Length); }
-            }
+            public override string Title => $"{base.Title} (Count: {Native.Blocks.Length})";
         }
 
         private sealed class YkdBlockView : View<YkdBlockView, YkdBlock>
@@ -476,22 +471,19 @@ namespace Pulse.UI
                     yield return new YkdBlockEntryView(entry);
             }
 
-            public override string Title
-            {
-                get { return String.Format("{0} (Count: {1})", base.Title, Native.Entries.Length); }
-            }
+            public override string Title => $"{base.Title} (Count: {Native.Entries.Length})";
 
-            [Category("Заголовок")]
-            [DisplayName("Тип")]
-            [Description("Тип блока.")]
+            [Category("Р—Р°РіРѕР»РѕРІРѕРє")]
+            [DisplayName("РўРёРї")]
+            [Description("РўРёРї Р±Р»РѕРєР°.")]
             public uint Type
             {
                 get { return Native.Type; }
             }
 
-            [Category("Заголовок")]
-            [DisplayName("Индекс")]
-            [Description("Нечто, похожее на уникальный номер блока.")]
+            [Category("Р—Р°РіРѕР»РѕРІРѕРє")]
+            [DisplayName("РРЅРґРµРєСЃ")]
+            [Description("РќРµС‡С‚Рѕ, РїРѕС…РѕР¶РµРµ РЅР° СѓРЅРёРєР°Р»СЊРЅС‹Р№ РЅРѕРјРµСЂ Р±Р»РѕРєР°.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Index
             {
@@ -499,9 +491,9 @@ namespace Pulse.UI
                 set { Native.Index = (uint)value; }
             }
 
-            [Category("Заголовок")]
-            [DisplayName("Связанный блок")]
-            [Description("Индекс связанного блока.")]
+            [Category("Р—Р°РіРѕР»РѕРІРѕРє")]
+            [DisplayName("РЎРІСЏР·Р°РЅРЅС‹Р№ Р±Р»РѕРє")]
+            [Description("РРЅРґРµРєСЃ СЃРІСЏР·Р°РЅРЅРѕРіРѕ Р±Р»РѕРєР°.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int AssociatedIndex
             {
@@ -509,9 +501,9 @@ namespace Pulse.UI
                 set { Native.AssociatedIndex = (uint)value; }
             }
 
-            [Category("Заголовок")]
-            [DisplayName("Неизвестно")]
-            [Description("Неизвестное значение.")]
+            [Category("Р—Р°РіРѕР»РѕРІРѕРє")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Unknown4
             {
@@ -519,9 +511,9 @@ namespace Pulse.UI
                 set { Native.Unknown = (uint)value; }
             }
 
-            [Category("Отображение")]
-            [DisplayName("Матрица преобразования")]
-            [Description("Массив 4-байтовых чисел, описывающих трансформирование изображения.")]
+            [Category("РћС‚РѕР±СЂР°Р¶РµРЅРёРµ")]
+            [DisplayName("РњР°С‚СЂРёС†Р° РїСЂРµРѕР±СЂР°Р·РѕРІР°РЅРёСЏ")]
+            [Description("РњР°СЃСЃРёРІ 4-Р±Р°Р№С‚РѕРІС‹С… С‡РёСЃРµР», РѕРїРёСЃС‹РІР°СЋС‰РёС… С‚СЂР°РЅСЃС„РѕСЂРјРёСЂРѕРІР°РЅРёРµ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(WrapTextBoxEditor), typeof(WrapTextBoxEditor))]
             public String TransformationMatrix
             {
@@ -529,9 +521,9 @@ namespace Pulse.UI
                 set { WriteInt32ArrayFromString(Native.TransformationMatrix, value); }
             }
 
-            [Category("Хвост")]
-            [DisplayName("Хвост (Типы 5,6)")]
-            [Description("Константный массив из 48 байт.")]
+            [Category("РҐРІРѕСЃС‚")]
+            [DisplayName("РҐРІРѕСЃС‚ (РўРёРїС‹ 5,6)")]
+            [Description("РљРѕРЅСЃС‚Р°РЅС‚РЅС‹Р№ РјР°СЃСЃРёРІ РёР· 48 Р±Р°Р№С‚.")]
             [Editor(typeof(WrapTextBoxEditor), typeof(WrapTextBoxEditor))]
             public String Tail56
             {
@@ -552,9 +544,9 @@ namespace Pulse.UI
                 yield break;
             }
 
-            [Category("Неизвестные")]
-            [DisplayName("Неизвестно1")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅС‹Рµ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ1")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Unknown1
             {
@@ -562,9 +554,9 @@ namespace Pulse.UI
                 set { Native.Unknown1 = value; }
             }
 
-            [Category("Неизвестные")]
-            [DisplayName("Неизвестно1")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅС‹Рµ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ1")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Unknown2
             {
@@ -572,9 +564,9 @@ namespace Pulse.UI
                 set { Native.Unknown2 = value; }
             }
 
-            [Category("Неизвестные")]
-            [DisplayName("Неизвестно1")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅС‹Рµ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ1")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Unknown3
             {
@@ -582,9 +574,9 @@ namespace Pulse.UI
                 set { Native.Unknown3 = value; }
             }
 
-            [Category("Неизвестные")]
-            [DisplayName("Неизвестно1")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅС‹Рµ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ1")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Unknown4
             {
@@ -606,14 +598,11 @@ namespace Pulse.UI
                     yield return new YkdBlockOptionalTailView(tail);
             }
 
-            public override string Title
-            {
-                get { return String.Format("{0} (Count: {1})", base.Title, Native.Tails.Length); }
-            }
+            public override string Title => $"{base.Title} (Count: {Native.Tails.Length})";
 
-            [Category("Неизвестные")]
-            [DisplayName("Неизвестно1")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅС‹Рµ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ1")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Unknown1
             {
@@ -621,9 +610,9 @@ namespace Pulse.UI
                 set { Native.Unknown1 = value; }
             }
 
-            [Category("Неизвестные")]
-            [DisplayName("Неизвестно1")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅС‹Рµ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ1")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Unknown2
             {
@@ -631,9 +620,9 @@ namespace Pulse.UI
                 set { Native.Unknown2 = value; }
             }
 
-            [Category("Неизвестные")]
-            [DisplayName("Неизвестно1")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅС‹Рµ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ1")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Unknown3
             {
@@ -660,9 +649,9 @@ namespace Pulse.UI
                 get { return String.IsNullOrEmpty(Native.Name) ? "<empty>" : Native.Name; }
             }
 
-            [Category("Описание")]
-            [DisplayName("Имя")]
-            [Description("Имя события. Вероятно, не несёт смысловой нагрузки.")]
+            [Category("РћРїРёСЃР°РЅРёРµ")]
+            [DisplayName("РРјСЏ")]
+            [Description("РРјСЏ СЃРѕР±С‹С‚РёСЏ. Р’РµСЂРѕСЏС‚РЅРѕ, РЅРµ РЅРµСЃС‘С‚ СЃРјС‹СЃР»РѕРІРѕР№ РЅР°РіСЂСѓР·РєРё.")]
             [Editor(typeof(TextBoxEditor), typeof(TextBoxEditor))]
             public String Name
             {
@@ -670,9 +659,9 @@ namespace Pulse.UI
                 set { Native.Name = value; }
             }
 
-            [Category("События")]
-            [DisplayName("Неизвестно 1")]
-            [Description("Неизвестное значение.")]
+            [Category("РЎРѕР±С‹С‚РёСЏ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 1")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int OUnknown1
             {
@@ -680,9 +669,9 @@ namespace Pulse.UI
                 set { Native.Offsets.Unknown1 = value; }
             }
 
-            [Category("События")]
-            [DisplayName("Неизвестно 2")]
-            [Description("Неизвестное значение.")]
+            [Category("РЎРѕР±С‹С‚РёСЏ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 2")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int OUnknown2
             {
@@ -690,9 +679,9 @@ namespace Pulse.UI
                 set { Native.Offsets.Unknown2 = value; }
             }
 
-            [Category("События")]
-            [DisplayName("Анимация?")]
-            [Description("Каким-то образом влияет на анимацию.")]
+            [Category("РЎРѕР±С‹С‚РёСЏ")]
+            [DisplayName("РђРЅРёРјР°С†РёСЏ?")]
+            [Description("РљР°РєРёРј-С‚Рѕ РѕР±СЂР°Р·РѕРј РІР»РёСЏРµС‚ РЅР° Р°РЅРёРјР°С†РёСЋ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int OUnknown3
             {
@@ -714,14 +703,11 @@ namespace Pulse.UI
                     yield return new YkdFrameView(frame);
             }
 
-            public override string Title
-            {
-                get { return String.Format("{0} (Count: {1})", base.Title, Native.Count); }
-            }
+            public override string Title => $"{base.Title} (Count: {Native.Count})";
 
-            [Category("Заголовок")]
-            [DisplayName("Неизвестно 1")]
-            [Description("Неизвестное значение.")]
+            [Category("Р—Р°РіРѕР»РѕРІРѕРє")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 1")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int HUnknown1
             {
@@ -729,9 +715,9 @@ namespace Pulse.UI
                 set { Native.Unknown1 = value; }
             }
 
-            [Category("Заголовок")]
-            [DisplayName("Флаги?")]
-            [Description("Разворачивает анимацию колебания курсора.")]
+            [Category("Р—Р°РіРѕР»РѕРІРѕРє")]
+            [DisplayName("Р¤Р»Р°РіРё?")]
+            [Description("Р Р°Р·РІРѕСЂР°С‡РёРІР°РµС‚ Р°РЅРёРјР°С†РёСЋ РєРѕР»РµР±Р°РЅРёСЏ РєСѓСЂСЃРѕСЂР°.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int HUnknown2
             {
@@ -739,9 +725,9 @@ namespace Pulse.UI
                 set { Native.Unknown2 = value; }
             }
 
-            [Category("Заголовок")]
-            [DisplayName("Неизвестно 3")]
-            [Description("Неизвестное значение.")]
+            [Category("Р—Р°РіРѕР»РѕРІРѕРє")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 3")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int HUnknown3
             {
@@ -762,14 +748,11 @@ namespace Pulse.UI
                 yield break;
             }
 
-            public override string Title
-            {
-                get { return String.Format("{0} (X: {1}, Y:{2})", base.Title, Native.X, Native.Y); }
-            }
+            public override string Title => $"{base.Title} (X: {Native.X}, Y:{Native.Y})";
 
-            [Category("Расположение")]
+            [Category("Р Р°СЃРїРѕР»РѕР¶РµРЅРёРµ")]
             [DisplayName("X")]
-            [Description("Координата на оси OX.")]
+            [Description("РљРѕРѕСЂРґРёРЅР°С‚Р° РЅР° РѕСЃРё OX.")]
             [Editor(typeof(SingleUpDownEditor), typeof(SingleUpDownEditor))]
             public float X
             {
@@ -777,9 +760,9 @@ namespace Pulse.UI
                 set { Native.X = value; }
             }
 
-            [Category("Расположение")]
+            [Category("Р Р°СЃРїРѕР»РѕР¶РµРЅРёРµ")]
             [DisplayName("Y")]
-            [Description("Координата на оси OY.")]
+            [Description("РљРѕРѕСЂРґРёРЅР°С‚Р° РЅР° РѕСЃРё OY.")]
             [Editor(typeof(SingleUpDownEditor), typeof(SingleUpDownEditor))]
             public float Y
             {
@@ -787,9 +770,9 @@ namespace Pulse.UI
                 set { Native.Y = value; }
             }
 
-            [Category("Неизвестно")]
-            [DisplayName("Неизвестно 1")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅРѕ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 1")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Unknown1
             {
@@ -797,9 +780,9 @@ namespace Pulse.UI
                 set { Native.Unknown1 = value; }
             }
 
-            [Category("Неизвестно")]
-            [DisplayName("Неизвестно 2")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅРѕ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 2")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(SingleUpDownEditor), typeof(SingleUpDownEditor))]
             public float Unknown2
             {
@@ -807,9 +790,9 @@ namespace Pulse.UI
                 set { Native.Unknown2 = value; }
             }
 
-            [Category("Неизвестно")]
-            [DisplayName("Неизвестно 3")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅРѕ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 3")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Unknown3
             {
@@ -817,9 +800,9 @@ namespace Pulse.UI
                 set { Native.Unknown3 = value; }
             }
 
-            [Category("Неизвестно")]
-            [DisplayName("Неизвестно 4")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅРѕ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 4")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Unknown4
             {
@@ -827,9 +810,9 @@ namespace Pulse.UI
                 set { Native.Unknown4 = value; }
             }
 
-            [Category("Неизвестно")]
-            [DisplayName("Неизвестно 5")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅРѕ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 5")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(SingleUpDownEditor), typeof(SingleUpDownEditor))]
             public float Unknown5
             {
@@ -837,9 +820,9 @@ namespace Pulse.UI
                 set { Native.Unknown5 = value; }
             }
 
-            [Category("Неизвестно")]
-            [DisplayName("Неизвестно 6")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅРѕ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 6")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(SingleUpDownEditor), typeof(SingleUpDownEditor))]
             public float Unknown6
             {
@@ -861,14 +844,11 @@ namespace Pulse.UI
                     yield return YkdResourceView.FromResource(resource, this);
             }
 
-            public override string Title
-            {
-                get { return String.Format("{0} (Count: {1})", base.Title, Native.Count); }
-            }
+            public override string Title => $"{base.Title} (Count: {Native.Count})";
 
-            [Category("События")]
-            [DisplayName("Неизвестно 1")]
-            [Description("Неизвестное значение.")]
+            [Category("РЎРѕР±С‹С‚РёСЏ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 1")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int OUnknown1
             {
@@ -876,9 +856,9 @@ namespace Pulse.UI
                 set { Native.Offsets.Unknown1 = value; }
             }
 
-            [Category("События")]
-            [DisplayName("Неизвестно 2")]
-            [Description("Неизвестное значение.")]
+            [Category("РЎРѕР±С‹С‚РёСЏ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 2")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int OUnknown2
             {
@@ -886,9 +866,9 @@ namespace Pulse.UI
                 set { Native.Offsets.Unknown2 = value; }
             }
 
-            [Category("События")]
-            [DisplayName("Анимация?")]
-            [Description("Каким-то образом влияет на анимацию.")]
+            [Category("РЎРѕР±С‹С‚РёСЏ")]
+            [DisplayName("РђРЅРёРјР°С†РёСЏ?")]
+            [Description("РљР°РєРёРј-С‚Рѕ РѕР±СЂР°Р·РѕРј РІР»РёСЏРµС‚ РЅР° Р°РЅРёРјР°С†РёСЋ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int OUnknown3
             {
@@ -912,18 +892,15 @@ namespace Pulse.UI
                 yield break;
             }
 
-            public override string Title
-            {
-                get { return String.Format("{0:D3} {1} {2}", Native.Index, Native.Type, String.IsNullOrEmpty(Native.Name) ? "<empty>" : Native.Name); }
-            }
+            public override string Title => $"{Native.Index:D3} {Native.Type} {(String.IsNullOrEmpty(Native.Name) ? "<empty>" : Native.Name)}";
 
             public override ContextMenu ContextMenu
             {
                 get
                 {
                     UiContextMenu menu = UiContextMenuFactory.Create();
-                    menu.AddChild(UiMenuItemFactory.Create("Сдублировать", new YkdResourceViewDuplicateCommand(this, _parent)));
-                    menu.AddChild(UiMenuItemFactory.Create("Удалить", new YkdResourceViewRemoveCommand(this, _parent)));
+                    menu.AddChild(UiMenuItemFactory.Create(Lang.Button.Clone, new YkdResourceViewDuplicateCommand(this, _parent)));
+                    menu.AddChild(UiMenuItemFactory.Create(Lang.Button.Remove, new YkdResourceViewRemoveCommand(this, _parent)));
                     return menu;
                 }
             }
@@ -946,7 +923,10 @@ namespace Pulse.UI
 
                 public void Execute(object parameter)
                 {
-                    if (MessageBox.Show(Application.Current.MainWindow, "Вы уверены, что хотите удалить этот ресурс?", "Удаление", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                    if (MessageBox.Show(Application.Current.MainWindow,
+                        Lang.Dockable.GameFilePreview.Ykd.ConfirmResourceRemoving,
+                        Lang.Dockable.GameFilePreview.Ykd.ResourceRemovingTitle,
+                        MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
                         return;
 
                     _collection.Native.Remove(_resource.Native);
@@ -981,9 +961,9 @@ namespace Pulse.UI
                 public event EventHandler CanExecuteChanged;
             }
 
-            [Category("Текстура")]
-            [DisplayName("Индекс")]
-            [Description("Какой-то номер.")]
+            [Category("РўРµРєСЃС‚СѓСЂР°")]
+            [DisplayName("РРЅРґРµРєСЃ")]
+            [Description("РљР°РєРѕР№-С‚Рѕ РЅРѕРјРµСЂ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Index
             {
@@ -991,9 +971,9 @@ namespace Pulse.UI
                 set { Native.Index = value; }
             }
 
-            [Category("Текстура")]
-            [DisplayName("Название")]
-            [Description("Название файла текстуры с расширением .txbh из этого же архива.")]
+            [Category("РўРµРєСЃС‚СѓСЂР°")]
+            [DisplayName("РќР°Р·РІР°РЅРёРµ")]
+            [Description("РќР°Р·РІР°РЅРёРµ С„Р°Р№Р»Р° С‚РµРєСЃС‚СѓСЂС‹ СЃ СЂР°СЃС€РёСЂРµРЅРёРµРј .txbh РёР· СЌС‚РѕРіРѕ Р¶Рµ Р°СЂС…РёРІР°.")]
             [Editor(typeof(TextBoxEditor), typeof(TextBoxEditor))]
             public String Name
             {
@@ -1001,9 +981,9 @@ namespace Pulse.UI
                 set { Native.Name = value; }
             }
 
-            [Category("Текстура")]
-            [DisplayName("Тип")]
-            [Description("Тип ресурса.")]
+            [Category("РўРµРєСЃС‚СѓСЂР°")]
+            [DisplayName("РўРёРї")]
+            [Description("РўРёРї СЂРµСЃСѓСЂСЃР°.")]
             public String Type
             {
                 get { return Native.Type.ToString(); }
@@ -1062,9 +1042,9 @@ namespace Pulse.UI
                 get { return (FragmentYkdResourceViewport)Native.Viewport; }
             }
 
-            [Category("Текстура")]
+            [Category("РўРµРєСЃС‚СѓСЂР°")]
             [DisplayName("X")]
-            [Description("Координата X верхнего-левого угла фрагмента текстуры.")]
+            [Description("РљРѕРѕСЂРґРёРЅР°С‚Р° X РІРµСЂС…РЅРµРіРѕ-Р»РµРІРѕРіРѕ СѓРіР»Р° С„СЂР°РіРјРµРЅС‚Р° С‚РµРєСЃС‚СѓСЂС‹.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int SourceX
             {
@@ -1072,18 +1052,18 @@ namespace Pulse.UI
                 set { Viewport.SourceX = value; }
             }
 
-            [Category("Текстура")]
+            [Category("РўРµРєСЃС‚СѓСЂР°")]
             [DisplayName("Y")]
-            [Description("Координата Y верхнего-левого угла фрагмента текстуры.")]
+            [Description("РљРѕРѕСЂРґРёРЅР°С‚Р° Y РІРµСЂС…РЅРµРіРѕ-Р»РµРІРѕРіРѕ СѓРіР»Р° С„СЂР°РіРјРµРЅС‚Р° С‚РµРєСЃС‚СѓСЂС‹.")]
             public int SourceY
             {
                 get { return Viewport.SourceY; }
                 set { Viewport.SourceY = value; }
             }
 
-            [Category("Текстура")]
-            [DisplayName("Ширина")]
-            [Description("Ширина фрагмента текстуры.")]
+            [Category("РўРµРєСЃС‚СѓСЂР°")]
+            [DisplayName("РЁРёСЂРёРЅР°")]
+            [Description("РЁРёСЂРёРЅР° С„СЂР°РіРјРµРЅС‚Р° С‚РµРєСЃС‚СѓСЂС‹.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int SourceWidth
             {
@@ -1091,36 +1071,36 @@ namespace Pulse.UI
                 set { Viewport.SourceWidth = value; }
             }
 
-            [Category("Текстура")]
-            [DisplayName("Высота")]
-            [Description("Высота фрагмента текстуры.")]
+            [Category("РўРµРєСЃС‚СѓСЂР°")]
+            [DisplayName("Р’С‹СЃРѕС‚Р°")]
+            [Description("Р’С‹СЃРѕС‚Р° С„СЂР°РіРјРµРЅС‚Р° С‚РµРєСЃС‚СѓСЂС‹.")]
             public int SourceHeight
             {
                 get { return Viewport.SourceHeight; }
                 set { Viewport.SourceHeight = value; }
             }
 
-            [Category("Отображение")]
-            [DisplayName("Ширина")]
-            [Description("Ширина отображения.")]
+            [Category("РћС‚РѕР±СЂР°Р¶РµРЅРёРµ")]
+            [DisplayName("РЁРёСЂРёРЅР°")]
+            [Description("РЁРёСЂРёРЅР° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             public int ViewportWidth
             {
                 get { return Viewport.ViewportWidth; }
                 set { Viewport.ViewportWidth = value; }
             }
 
-            [Category("Отображение")]
-            [DisplayName("Высота")]
-            [Description("Высота отображения.")]
+            [Category("РћС‚РѕР±СЂР°Р¶РµРЅРёРµ")]
+            [DisplayName("Р’С‹СЃРѕС‚Р°")]
+            [Description("Р’С‹СЃРѕС‚Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             public int ViewportHeight
             {
                 get { return Viewport.ViewportHeight; }
                 set { Viewport.ViewportHeight = value; }
             }
 
-            [Category("Отображение")]
-            [DisplayName("Флаги")]
-            [Description("Различные модификаторы отображения.")]
+            [Category("РћС‚РѕР±СЂР°Р¶РµРЅРёРµ")]
+            [DisplayName("Р¤Р»Р°РіРё")]
+            [Description("Р Р°Р·Р»РёС‡РЅС‹Рµ РјРѕРґРёС„РёРєР°С‚РѕСЂС‹ РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Flags
             {
@@ -1128,9 +1108,9 @@ namespace Pulse.UI
                 set { Viewport.Flags = (YkdResourceFlags)value; }
             }
 
-            [Category("Неизвестные")]
-            [DisplayName("Неизвестно 5")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅС‹Рµ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 5")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Unknown5
             {
@@ -1138,9 +1118,9 @@ namespace Pulse.UI
                 set { Viewport.Unknown5 = value; }
             }
 
-            [Category("Градиент")]
-            [DisplayName("Верхний-левый")]
-            [Description("Цвет верхнего-левого угла отображения.")]
+            [Category("Р“СЂР°РґРёРµРЅС‚")]
+            [DisplayName("Р’РµСЂС…РЅРёР№-Р»РµРІС‹Р№")]
+            [Description("Р¦РІРµС‚ РІРµСЂС…РЅРµРіРѕ-Р»РµРІРѕРіРѕ СѓРіР»Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(ColorEditor), typeof(ColorEditor))]
             public Color UpperLeftColor
             {
@@ -1148,9 +1128,9 @@ namespace Pulse.UI
                 set { Viewport.UpperLeftColor = ColorsHelper.GetBGRA(value); }
             }
 
-            [Category("Градиент")]
-            [DisplayName("Нижний-левый")]
-            [Description("Цвет нижнего-левого угла отображения.")]
+            [Category("Р“СЂР°РґРёРµРЅС‚")]
+            [DisplayName("РќРёР¶РЅРёР№-Р»РµРІС‹Р№")]
+            [Description("Р¦РІРµС‚ РЅРёР¶РЅРµРіРѕ-Р»РµРІРѕРіРѕ СѓРіР»Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(ColorEditor), typeof(ColorEditor))]
             public Color BottomLeftColor
             {
@@ -1158,9 +1138,9 @@ namespace Pulse.UI
                 set { Viewport.BottomLeftColor = ColorsHelper.GetBGRA(value); }
             }
 
-            [Category("Градиент")]
-            [DisplayName("Верхний-правый")]
-            [Description("Цвет верхнего-правого угла отображения.")]
+            [Category("Р“СЂР°РґРёРµРЅС‚")]
+            [DisplayName("Р’РµСЂС…РЅРёР№-РїСЂР°РІС‹Р№")]
+            [Description("Р¦РІРµС‚ РІРµСЂС…РЅРµРіРѕ-РїСЂР°РІРѕРіРѕ СѓРіР»Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(ColorEditor), typeof(ColorEditor))]
             public Color UpperRightColor
             {
@@ -1168,9 +1148,9 @@ namespace Pulse.UI
                 set { Viewport.UpperRightColor = ColorsHelper.GetBGRA(value); }
             }
 
-            [Category("Градиент")]
-            [DisplayName("Нижний-правый")]
-            [Description("Цвет нижнего-правого угла отображения.")]
+            [Category("Р“СЂР°РґРёРµРЅС‚")]
+            [DisplayName("РќРёР¶РЅРёР№-РїСЂР°РІС‹Р№")]
+            [Description("Р¦РІРµС‚ РЅРёР¶РЅРµРіРѕ-РїСЂР°РІРѕРіРѕ СѓРіР»Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(ColorEditor), typeof(ColorEditor))]
             public Color BottomRightColor
             {
@@ -1196,27 +1176,27 @@ namespace Pulse.UI
                 get { return (FullYkdResourceViewport)Native.Viewport; }
             }
 
-            [Category("Отображение")]
-            [DisplayName("Ширина")]
-            [Description("Ширина отображения.")]
+            [Category("РћС‚РѕР±СЂР°Р¶РµРЅРёРµ")]
+            [DisplayName("РЁРёСЂРёРЅР°")]
+            [Description("РЁРёСЂРёРЅР° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             public int ViewportWidth
             {
                 get { return Viewport.ViewportWidth; }
                 set { Viewport.ViewportWidth = value; }
             }
 
-            [Category("Отображение")]
-            [DisplayName("Высота")]
-            [Description("Высота отображения.")]
+            [Category("РћС‚РѕР±СЂР°Р¶РµРЅРёРµ")]
+            [DisplayName("Р’С‹СЃРѕС‚Р°")]
+            [Description("Р’С‹СЃРѕС‚Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             public int ViewportHeight
             {
                 get { return Viewport.ViewportHeight; }
                 set { Viewport.ViewportHeight = value; }
             }
 
-            [Category("Градиент")]
-            [DisplayName("Верхний-левый")]
-            [Description("Цвет верхнего-левого угла отображения.")]
+            [Category("Р“СЂР°РґРёРµРЅС‚")]
+            [DisplayName("Р’РµСЂС…РЅРёР№-Р»РµРІС‹Р№")]
+            [Description("Р¦РІРµС‚ РІРµСЂС…РЅРµРіРѕ-Р»РµРІРѕРіРѕ СѓРіР»Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(ColorEditor), typeof(ColorEditor))]
             public Color UpperLeftColor
             {
@@ -1224,9 +1204,9 @@ namespace Pulse.UI
                 set { Viewport.UpperLeftColor = ColorsHelper.GetBGRA(value); }
             }
 
-            [Category("Градиент")]
-            [DisplayName("Нижний-левый")]
-            [Description("Цвет нижнего-левого угла отображения.")]
+            [Category("Р“СЂР°РґРёРµРЅС‚")]
+            [DisplayName("РќРёР¶РЅРёР№-Р»РµРІС‹Р№")]
+            [Description("Р¦РІРµС‚ РЅРёР¶РЅРµРіРѕ-Р»РµРІРѕРіРѕ СѓРіР»Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(ColorEditor), typeof(ColorEditor))]
             public Color BottomLeftColor
             {
@@ -1234,9 +1214,9 @@ namespace Pulse.UI
                 set { Viewport.BottomLeftColor = ColorsHelper.GetBGRA(value); }
             }
 
-            [Category("Градиент")]
-            [DisplayName("Верхний-правый")]
-            [Description("Цвет верхнего-правого угла отображения.")]
+            [Category("Р“СЂР°РґРёРµРЅС‚")]
+            [DisplayName("Р’РµСЂС…РЅРёР№-РїСЂР°РІС‹Р№")]
+            [Description("Р¦РІРµС‚ РІРµСЂС…РЅРµРіРѕ-РїСЂР°РІРѕРіРѕ СѓРіР»Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(ColorEditor), typeof(ColorEditor))]
             public Color UpperRightColor
             {
@@ -1244,9 +1224,9 @@ namespace Pulse.UI
                 set { Viewport.UpperRightColor = ColorsHelper.GetBGRA(value); }
             }
 
-            [Category("Градиент")]
-            [DisplayName("Нижний-правый")]
-            [Description("Цвет нижнего-правого угла отображения.")]
+            [Category("Р“СЂР°РґРёРµРЅС‚")]
+            [DisplayName("РќРёР¶РЅРёР№-РїСЂР°РІС‹Р№")]
+            [Description("Р¦РІРµС‚ РЅРёР¶РЅРµРіРѕ-РїСЂР°РІРѕРіРѕ СѓРіР»Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(ColorEditor), typeof(ColorEditor))]
             public Color BottomRightColor
             {
@@ -1254,18 +1234,18 @@ namespace Pulse.UI
                 set { Viewport.BottomRightColor = ColorsHelper.GetBGRA(value); }
             }
 
-            [Category("Отображение")]
-            [DisplayName("Неизвестно 1")]
-            [Description("Неизвестное значение.")]
+            [Category("РћС‚РѕР±СЂР°Р¶РµРЅРёРµ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 1")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             public int Unknown1
             {
                 get { return Viewport.Unknown1; }
                 set { Viewport.Unknown1 = value; }
             }
 
-            [Category("Отображение")]
-            [DisplayName("Неизвестно 2")]
-            [Description("Неизвестное значение.")]
+            [Category("РћС‚РѕР±СЂР°Р¶РµРЅРёРµ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 2")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             public int Unknown2
             {
                 get { return Viewport.Unknown2; }
@@ -1290,9 +1270,9 @@ namespace Pulse.UI
                 get { return (ExtraYkdResourceViewport)Native.Viewport; }
             }
 
-            [Category("Текстура")]
+            [Category("РўРµРєСЃС‚СѓСЂР°")]
             [DisplayName("X")]
-            [Description("Координата X верхнего-левого угла фрагмента текстуры.")]
+            [Description("РљРѕРѕСЂРґРёРЅР°С‚Р° X РІРµСЂС…РЅРµРіРѕ-Р»РµРІРѕРіРѕ СѓРіР»Р° С„СЂР°РіРјРµРЅС‚Р° С‚РµРєСЃС‚СѓСЂС‹.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int SourceX
             {
@@ -1300,18 +1280,18 @@ namespace Pulse.UI
                 set { Viewport.SourceX = value; }
             }
 
-            [Category("Текстура")]
+            [Category("РўРµРєСЃС‚СѓСЂР°")]
             [DisplayName("Y")]
-            [Description("Координата Y верхнего-левого угла фрагмента текстуры.")]
+            [Description("РљРѕРѕСЂРґРёРЅР°С‚Р° Y РІРµСЂС…РЅРµРіРѕ-Р»РµРІРѕРіРѕ СѓРіР»Р° С„СЂР°РіРјРµРЅС‚Р° С‚РµРєСЃС‚СѓСЂС‹.")]
             public int SourceY
             {
                 get { return Viewport.SourceY; }
                 set { Viewport.SourceY = value; }
             }
 
-            [Category("Текстура")]
-            [DisplayName("Ширина")]
-            [Description("Ширина фрагмента текстуры.")]
+            [Category("РўРµРєСЃС‚СѓСЂР°")]
+            [DisplayName("РЁРёСЂРёРЅР°")]
+            [Description("РЁРёСЂРёРЅР° С„СЂР°РіРјРµРЅС‚Р° С‚РµРєСЃС‚СѓСЂС‹.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int SourceWidth
             {
@@ -1319,36 +1299,36 @@ namespace Pulse.UI
                 set { Viewport.SourceWidth = value; }
             }
 
-            [Category("Текстура")]
-            [DisplayName("Высота")]
-            [Description("Высота фрагмента текстуры.")]
+            [Category("РўРµРєСЃС‚СѓСЂР°")]
+            [DisplayName("Р’С‹СЃРѕС‚Р°")]
+            [Description("Р’С‹СЃРѕС‚Р° С„СЂР°РіРјРµРЅС‚Р° С‚РµРєСЃС‚СѓСЂС‹.")]
             public int SourceHeight
             {
                 get { return Viewport.SourceHeight; }
                 set { Viewport.SourceHeight = value; }
             }
 
-            [Category("Отображение")]
-            [DisplayName("Ширина")]
-            [Description("Ширина отображения.")]
+            [Category("РћС‚РѕР±СЂР°Р¶РµРЅРёРµ")]
+            [DisplayName("РЁРёСЂРёРЅР°")]
+            [Description("РЁРёСЂРёРЅР° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             public int ViewportWidth
             {
                 get { return Viewport.ViewportWidth; }
                 set { Viewport.ViewportWidth = value; }
             }
 
-            [Category("Отображение")]
-            [DisplayName("Высота")]
-            [Description("Высота отображения.")]
+            [Category("РћС‚РѕР±СЂР°Р¶РµРЅРёРµ")]
+            [DisplayName("Р’С‹СЃРѕС‚Р°")]
+            [Description("Р’С‹СЃРѕС‚Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             public int ViewportHeight
             {
                 get { return Viewport.ViewportHeight; }
                 set { Viewport.ViewportHeight = value; }
             }
 
-            [Category("Отображение")]
-            [DisplayName("Флаги")]
-            [Description("Различные модификаторы отображения.")]
+            [Category("РћС‚РѕР±СЂР°Р¶РµРЅРёРµ")]
+            [DisplayName("Р¤Р»Р°РіРё")]
+            [Description("Р Р°Р·Р»РёС‡РЅС‹Рµ РјРѕРґРёС„РёРєР°С‚РѕСЂС‹ РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Flags
             {
@@ -1356,9 +1336,9 @@ namespace Pulse.UI
                 set { Viewport.Flags = (YkdResourceFlags)value; }
             }
 
-            [Category("Неизвестные")]
-            [DisplayName("Неизвестно 5")]
-            [Description("Неизвестное значение.")]
+            [Category("РќРµРёР·РІРµСЃС‚РЅС‹Рµ")]
+            [DisplayName("РќРµРёР·РІРµСЃС‚РЅРѕ 5")]
+            [Description("РќРµРёР·РІРµСЃС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ.")]
             [Editor(typeof(IntegerUpDownEditor), typeof(IntegerUpDownEditor))]
             public int Unknown5
             {
@@ -1366,9 +1346,9 @@ namespace Pulse.UI
                 set { Viewport.Unknown5 = value; }
             }
 
-            [Category("Градиент")]
-            [DisplayName("Верхний-левый")]
-            [Description("Цвет верхнего-левого угла отображения.")]
+            [Category("Р“СЂР°РґРёРµРЅС‚")]
+            [DisplayName("Р’РµСЂС…РЅРёР№-Р»РµРІС‹Р№")]
+            [Description("Р¦РІРµС‚ РІРµСЂС…РЅРµРіРѕ-Р»РµРІРѕРіРѕ СѓРіР»Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(ColorEditor), typeof(ColorEditor))]
             public Color UpperLeftColor
             {
@@ -1376,9 +1356,9 @@ namespace Pulse.UI
                 set { Viewport.UpperLeftColor = ColorsHelper.GetBGRA(value); }
             }
 
-            [Category("Градиент")]
-            [DisplayName("Нижний-левый")]
-            [Description("Цвет нижнего-левого угла отображения.")]
+            [Category("Р“СЂР°РґРёРµРЅС‚")]
+            [DisplayName("РќРёР¶РЅРёР№-Р»РµРІС‹Р№")]
+            [Description("Р¦РІРµС‚ РЅРёР¶РЅРµРіРѕ-Р»РµРІРѕРіРѕ СѓРіР»Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(ColorEditor), typeof(ColorEditor))]
             public Color BottomLeftColor
             {
@@ -1386,9 +1366,9 @@ namespace Pulse.UI
                 set { Viewport.BottomLeftColor = ColorsHelper.GetBGRA(value); }
             }
 
-            [Category("Градиент")]
-            [DisplayName("Верхний-правый")]
-            [Description("Цвет верхнего-правого угла отображения.")]
+            [Category("Р“СЂР°РґРёРµРЅС‚")]
+            [DisplayName("Р’РµСЂС…РЅРёР№-РїСЂР°РІС‹Р№")]
+            [Description("Р¦РІРµС‚ РІРµСЂС…РЅРµРіРѕ-РїСЂР°РІРѕРіРѕ СѓРіР»Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(ColorEditor), typeof(ColorEditor))]
             public Color UpperRightColor
             {
@@ -1396,15 +1376,96 @@ namespace Pulse.UI
                 set { Viewport.UpperRightColor = ColorsHelper.GetBGRA(value); }
             }
 
-            [Category("Градиент")]
-            [DisplayName("Нижний-правый")]
-            [Description("Цвет нижнего-правого угла отображения.")]
+            [Category("Р“СЂР°РґРёРµРЅС‚")]
+            [DisplayName("РќРёР¶РЅРёР№-РїСЂР°РІС‹Р№")]
+            [Description("Р¦РІРµС‚ РЅРёР¶РЅРµРіРѕ-РїСЂР°РІРѕРіРѕ СѓРіР»Р° РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ.")]
             [Editor(typeof(ColorEditor), typeof(ColorEditor))]
             public Color BottomRightColor
             {
                 get { return ColorsHelper.GetBGRA(Viewport.BottomRightColor); }
                 set { Viewport.BottomRightColor = ColorsHelper.GetBGRA(value); }
             }
+        }
+    }
+
+    public static class ColorsHelper
+    {
+        private const double ColorRate = 255.0 / 31;
+
+        public static bool IsBlack(Color color)
+        {
+            return (0 == color.R && color.R == color.G && color.G == color.B);
+        }
+
+        public static Color ReadColor(Stream input, byte[] buff)
+        {
+            switch (buff.Length)
+            {
+                case 2:
+                    return ReadA1B5G5R5Color(input, buff);
+                case 3:
+                    return ReadB8G8R8Color(input, buff);
+                case 4:
+                    return ReadBGRAColor(input, buff);
+                default:
+                    throw new NotSupportedException(buff.Length.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+
+        private static Color ReadA1B5G5R5Color(Stream input, byte[] buff)
+        {
+            input.EnsureRead(buff, 0, 2);
+            ushort color = BitConverter.ToUInt16(buff, 0);
+
+            return Color.FromArgb(
+                (byte)(((color >> 15) & 1) * 255),
+                (byte)Math.Round((color & 31) * ColorRate),
+                (byte)Math.Round((color >> 5 & 31) * ColorRate),
+                (byte)Math.Round((color >> 10 & 31) * ColorRate));
+        }
+
+        private static Color ReadB8G8R8Color(Stream input, byte[] buff)
+        {
+            input.EnsureRead(buff, 0, 3);
+            return Color.FromArgb(255, buff[2], buff[1], buff[0]);
+        }
+
+        private static Color ReadBGRAColor(Stream input, byte[] buff)
+        {
+            input.EnsureRead(buff, 0, 4);
+            return Color.FromArgb(buff[3], buff[2], buff[1], buff[0]);
+        }
+
+        public static Color GetBGRA(int value)
+        {
+            unsafe
+            {
+                byte[] numArray = new byte[4];
+                fixed (byte* numPtr = numArray)
+                    *(int*)numPtr = value;
+
+                return Color.FromArgb(numArray[3], numArray[2], numArray[1], numArray[0]);
+            }
+        }
+
+        public static int GetBGRA(Color value)
+        {
+            return (value.A << 24) | (value.R << 16) | (value.G << 8) | value.B;
+        }
+
+        public static void WriteBgra(Stream output, Color color)
+        {
+            output.WriteByte(color.B);
+            output.WriteByte(color.G);
+            output.WriteByte(color.R);
+            output.WriteByte(color.A);
+        }
+
+        public static void WriteBgr(Stream output, Color color)
+        {
+            output.WriteByte(color.B);
+            output.WriteByte(color.G);
+            output.WriteByte(color.R);
         }
     }
 }

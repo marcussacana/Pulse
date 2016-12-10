@@ -23,7 +23,7 @@ namespace Pulse.UI
 
             Assembly assembly = Assembly.GetEntryAssembly();
             FileVersionInfo fvi = FileVersionInfo.GetVersionInfo(assembly.Location);
-            Title = String.Format("{0} {1} {2}", fvi.ProductName, fvi.FileVersion, fvi.LegalCopyright);
+            Title = $"{fvi.ProductName} {fvi.FileVersion} {fvi.LegalCopyright}";
 
             Width = 640;
             Height = 480;
@@ -66,8 +66,9 @@ namespace Pulse.UI
                 if (e.Model.Title != (string)item.Header)
                     continue;
 
-                e.Model.Content = item.CommandParameter;
-                e.Cancel = true;
+                e.Content = item.CommandParameter;
+                //e.Model.Content = item.CommandParameter;
+                e.Cancel = false;
                 return;
             }
         }

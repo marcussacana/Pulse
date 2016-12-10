@@ -12,6 +12,8 @@ namespace Pulse.FS
         private readonly BinaryReader _br;
         private readonly FFXIIITextEncoding _encoding;
 
+        public ZtrFileType Type { get; private set; }
+
         public ZtrFileUnpacker(Stream input, FFXIIITextEncoding encoding)
         {
             _encoding = encoding;
@@ -24,22 +26,22 @@ namespace Pulse.FS
             if (_input.Length < 5)
                 return new ZtrFileEntry[0];
 
-            ZtrFileType type = (ZtrFileType)_br.ReadInt32();
-            switch (type)
+            Type = (ZtrFileType)_br.ReadInt32();
+            switch (Type)
             {
                 case ZtrFileType.LittleEndianUncompressedPair:
                     return ExtractLittleEndianUncompressedPair();
                 case ZtrFileType.BigEndianCompressedDictionary:
                     return ExtractBigEndianCompressedDictionary();
                 default:
-                    return ExtractLittleEndianUncompressedDictionary((int)type);
+                    return ExtractLittleEndianUncompressedDictionary((int)Type);
             }
         }
 
         private ZtrFileEntry[] ExtractLittleEndianUncompressedDictionary(int count)
         {
             if (count < 0 || count > 102400)
-                throw new ArgumentOutOfRangeException("count", count.ToString());
+                throw new ArgumentOutOfRangeException(nameof(count), count.ToString());
 
             ZtrFileEntry[] entries = new ZtrFileEntry[count];
             entries.InitializeElements();
@@ -61,7 +63,7 @@ namespace Pulse.FS
 
         private ZtrFileEntry[] ExtractLittleEndianUncompressedPair()
         {
-            ZtrFileEntry result = new ZtrFileEntry();;
+            ZtrFileEntry result = new ZtrFileEntry();
 
             int keyOffset = _br.ReadInt32();
             int textOffset = _br.ReadInt32();

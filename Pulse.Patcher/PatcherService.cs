@@ -1,4 +1,4 @@
-using System;
+Ôªøusing System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Threading;
@@ -14,7 +14,8 @@ namespace Pulse.Patcher
     public static class PatcherService
     {
         public const PatchFormatVersion Version = PatchFormatVersion.V1;
-        public const string ArchiveFileName = "ff13.ffrtt.ru";
+        public const string ArchiveFileName = "translation.zip";
+        public const string ConfigurationFileName = "config.xml";
 
         private static readonly ConcurrentDictionary<FrameworkElement, FrameworkElement> Controls = new ConcurrentDictionary<FrameworkElement, FrameworkElement>();
 
@@ -45,7 +46,7 @@ namespace Pulse.Patcher
                 using (RegistryKey registryKey = localMachine.OpenSubKey(GetSteamRegistyPath(gamePart)))
                 {
                     if (registryKey == null)
-                        throw Exceptions.CreateException("«‡ÔËÒ¸ ‚ ÂÂÒÚÂ ÌÂ Ó·Ì‡ÛÊÂÌ‡.");
+                        throw Exceptions.CreateException("–ó–∞–ø–∏—Å—å –≤ —Ä–µ–µ—Å—Ç—Ä–µ –Ω–µ –æ–±–Ω–∞—Ä—É–∂–µ–Ω–∞.");
 
                     GameLocationInfo result = new GameLocationInfo((string)registryKey.GetValue(GameLocationSteamRegistryProvider.SteamGamePathTag));
                     result.Validate();
@@ -57,7 +58,7 @@ namespace Pulse.Patcher
             {
                 return Application.Current.Dispatcher.Invoke(() =>
                 {
-                    using (CommonOpenFileDialog dlg = new CommonOpenFileDialog(String.Format("”Í‡ÊËÚÂ Í‡Ú‡ÎÓ„ Final Fantasy XIII-{0}...", (int)gamePart)))
+                    using (CommonOpenFileDialog dlg = new CommonOpenFileDialog($"–£–∫–∞–∂–∏—Ç–µ –∫–∞—Ç–∞–ª–æ–≥ Final Fantasy XIII-{(int)gamePart}..."))
                     {
                         dlg.IsFolderPicker = true;
                         if (dlg.ShowDialog() != CommonFileDialogResult.Ok)

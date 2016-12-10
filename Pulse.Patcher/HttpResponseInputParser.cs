@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
@@ -46,7 +46,7 @@ namespace Pulse.Patcher
             for (int i = Count - 1; i >= 0; i--)
             {
                 string key = this[i];
-                string pattern = String.Format("name=\"{0}\" value=\"", key);
+                string pattern = $"name=\"{key}\" value=\"";
 
                 int tokenIndex = line.IndexOf(pattern, StringComparison.Ordinal);
                 if (tokenIndex < 0)

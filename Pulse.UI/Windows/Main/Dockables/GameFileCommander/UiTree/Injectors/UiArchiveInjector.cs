@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using Pulse.Core;
@@ -44,7 +44,13 @@ namespace Pulse.UI
             {
                 String sourcePath = Path.Combine(root, PathEx.ChangeMultiDotExtension(entry.Name, null));
                 String directoryPath = Path.GetDirectoryName(sourcePath);
-                if (!_source.DirectoryIsExists(directoryPath))
+
+                if (entry.Name.EndsWith(".ztr"))
+                {
+                    if (_source.TryProvideStrings() == null && !_source.DirectoryIsExists(directoryPath))
+                        continue;
+                }
+                else if (!_source.DirectoryIsExists(directoryPath))
                     continue;
 
                 Inject(entry, sourcePath);

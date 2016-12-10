@@ -1,4 +1,4 @@
-using System;
+п»їusing System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Media;
@@ -55,6 +55,35 @@ namespace Pulse.UI
             return Childs;
         }
 
+        public IEnumerable<UiNode> EnumerateNodes(UiNodePath path)
+        {
+            return (EnumerateNodes(path, 0));
+        }
+
+        private IEnumerable<UiNode> EnumerateNodes(UiNodePath path, int level)
+        {
+            UiNodePathElement element = path[level];
+            if (element == null)
+                yield break;
+
+            foreach (UiNode node in GetChilds().Where(node => element.IsMatch(node)))
+            {
+                if (path.IsLast(level))
+                {
+                    yield return node;
+                }
+                else
+                {
+                    UiContainerNode container = node as UiContainerNode;
+                    if (container == null)
+                        continue;
+
+                    foreach (UiNode child in container.EnumerateNodes(path, level + 1))
+                        yield return child;
+                }
+            }
+        }
+
         public IEnumerable<IUiLeaf> EnumerateCheckedLeafs(Wildcard wildcard, bool parentChecked)
         {
             foreach (UiNode node in GetChilds())
@@ -62,8 +91,8 @@ namespace Pulse.UI
                 if (!parentChecked && node.IsChecked == false)
                     continue;
 
-                // Родительский контейнер может быть помечен, а вложенный нет
-                // Это сделано специально для отложенной загрузки вложенных элементов
+                // Р РѕРґРёС‚РµР»СЊСЃРєРёР№ РєРѕРЅС‚РµР№РЅРµСЂ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїРѕРјРµС‡РµРЅ, Р° РІР»РѕР¶РµРЅРЅС‹Р№ РЅРµС‚
+                // Р­С‚Рѕ СЃРґРµР»Р°РЅРѕ СЃРїРµС†РёР°Р»СЊРЅРѕ РґР»СЏ РѕС‚Р»РѕР¶РµРЅРЅРѕР№ Р·Р°РіСЂСѓР·РєРё РІР»РѕР¶РµРЅРЅС‹С… СЌР»РµРјРµРЅС‚РѕРІ
                 bool isChecked = parentChecked || node.IsChecked == true;
 
                 UiContainerNode container = node as UiContainerNode;

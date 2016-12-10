@@ -12,7 +12,8 @@
     <TargetFrameworkVersion>v4.5.1</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <TargetFrameworkProfile />
-    <NuGetPackageImportStamp>d6f8b6f8</NuGetPackageImportStamp>
+    <NuGetPackageImportStamp>
+    </NuGetPackageImportStamp>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -23,6 +24,7 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <UseVSHostingProcess>true</UseVSHostingProcess>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -31,6 +33,7 @@
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
     <DebugSymbols>true</DebugSymbols>
@@ -61,6 +64,7 @@
     <PlatformTarget>x86</PlatformTarget>
     <ErrorReport>prompt</ErrorReport>
     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
+    <UseVSHostingProcess>true</UseVSHostingProcess>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x86'">
     <OutputPath>bin\x86\Release\</OutputPath>
@@ -85,37 +89,54 @@
       <HintPath>..\packages\NVorbis.0.8.4.0\lib\NVorbis.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="OpenTK, Version=1.1.0.0, Culture=neutral, PublicKeyToken=bad199fe84eb3df4, processorArchitecture=MSIL">
-      <HintPath>..\packages\OpenTK.1.1.1589.5942\lib\NET40\OpenTK.dll</HintPath>
-    </Reference>
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xaml" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Data" />
     <Reference Include="System.Xml" />
+    <Reference Include="WindowsBase" />
     <Reference Include="zlib.net">
       <HintPath>..\packages\zlib.net.1.0.4.0\lib\zlib.net.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ArchiveListing\ArchiveListingCompressedData.cs" />
-    <Compile Include="ArchiveListing\ArchiveListingEntryInfoV2.cs" />
+    <Compile Include="ArchiveListing\XIII-2\ArchiveListingEntryInfoV2.cs" />
     <Compile Include="ArchiveListing\ArchiveAccessor.cs" />
     <Compile Include="ArchiveListing\ArchiveListing.cs" />
     <Compile Include="ArchiveListing\ArchiveEntry.cs" />
-    <Compile Include="ArchiveListing\ArchiveListingEntryInfoV1.cs" />
-    <Compile Include="ArchiveListing\ArchiveListingHeader.cs" />
+    <Compile Include="ArchiveListing\XIII-1\ArchiveListingEntryInfoV1.cs" />
+    <Compile Include="ArchiveListing\XIII-1\ArchiveListingHeaderV1.cs" />
     <Compile Include="ArchiveListing\ArchiveListingBlockInfo.cs" />
-    <Compile Include="ArchiveListing\ArchiveListingReaderV1.cs" />
-    <Compile Include="ArchiveListing\ArchiveListingTextWriter.cs" />
-    <Compile Include="ArchiveListing\ArchiveListingWriter.cs" />
+    <Compile Include="ArchiveListing\XIII-2\ArchiveListingHeaderV2.cs" />
+    <Compile Include="ArchiveListing\XIII-2\ArchiveListingReaderV2.cs" />
+    <Compile Include="ArchiveListing\XIII-1\ArchiveListingReaderV1.cs" />
+    <Compile Include="ArchiveListing\XIII-2\ArchiveListingTextWriterV2.cs" />
+    <Compile Include="ArchiveListing\XIII-1\ArchiveListingTextWriterV1.cs" />
+    <Compile Include="ArchiveListing\XIII-2\ArchiveListingWriterV2.cs" />
+    <Compile Include="ArchiveListing\XIII-1\ArchiveListingWriterV1.cs" />
     <Compile Include="ArchiveListing\IArchiveEntry.cs" />
     <Compile Include="ArchiveListing\IArchiveListing.cs" />
+    <Compile Include="ArchiveListing\IArchiveListingHeader.cs" />
+    <Compile Include="ArchiveListing\XIII-3\ArchiveListingEntryInfoV3.cs" />
+    <Compile Include="ArchiveListing\XIII-3\ArchiveListingHeaderV3.cs" />
+    <Compile Include="ArchiveListing\XIII-3\ArchiveListingReaderV3.cs" />
+    <Compile Include="ArchiveListing\XIII-3\ArchiveListingTextWriterV3.cs" />
+    <Compile Include="ArchiveListing\XIII-3\ArchiveListingWriterV3.cs" />
+    <Compile Include="IMGB\WPD\WDB\Movies\WdbMovieArchiveListingReader.cs" />
+    <Compile Include="IMGB\WPD\WDB\Movies\WdbMovieArchiveListing.cs" />
+    <Compile Include="IMGB\WPD\WDB\DbArchiveAccessor.cs" />
     <Compile Include="IMGB\Sections\Textures\VTEX\VtexHeader.cs" />
+    <Compile Include="IMGB\WPD\WDB\WdbHeader.cs" />
+    <Compile Include="IMGB\WPD\WDB\Movies\WdbMovieHeader.cs" />
+    <Compile Include="IMGB\WPD\WDB\Movies\WdbMovieEntry.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="IMGB\Sections\GtexHeader.cs" />
     <Compile Include="IMGB\Sections\SectionBase.cs" />
@@ -168,7 +189,9 @@
     <Compile Include="ZTR\IZtrFormatter.cs" />
     <Compile Include="ZTR\StringsZtrFormatter.cs" />
     <Compile Include="ZTR\TxtZtrFormatter.cs" />
+    <Compile Include="ZTR\ZtrFileKeysPacker.cs" />
     <Compile Include="ZTR\ZtrFilePacker.cs" />
+    <Compile Include="ZTR\ZtrFileTextPacker.cs" />
     <Compile Include="ZTR\ZtrTextWriter.cs" />
     <Compile Include="ZTR\ZtrFileEncoding.cs" />
     <Compile Include="ZTR\ZtrFileEntry.cs" />
@@ -190,9 +213,6 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <Content Include="ArchiveListing\XIII-2\format.h" />
-    <Content Include="ArchiveListing\XIII-2\main.cpp" />
-    <Content Include="ArchiveListing\XIII-2\misc.cpp" />
     <None Include="Resources\Executable\ffxiiicrypt.exe">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

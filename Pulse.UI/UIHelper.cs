@@ -1,4 +1,4 @@
-using System;
+п»їusing System;
 using System.Text;
 using System.Windows;
 using Pulse.Core;
@@ -20,12 +20,12 @@ namespace Pulse.UI
 
             if (owner == null)
             {
-                MessageBox.Show(sb.ToString(), "Ошибка!", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(sb.ToString(), Lang.Message.Error.Title, MessageBoxButton.OK, MessageBoxImage.Error);
             }
             else
             {
                 Window window = (Window)owner.GetRootElement();
-                MessageBox.Show(window, sb.ToString(), "Ошибка!", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(window, sb.ToString(), Lang.Message.Error.Title, MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -56,20 +56,7 @@ namespace Pulse.UI
                 case 6:
                     return string.Format("{0:F2} " + Lang.Measurement.EByteAbbr, dec);
                 default:
-                    throw new ArgumentOutOfRangeException("value");
-            }
-        }
-
-        public static void ShowSuccess(FrameworkElement owner, string text)
-        {
-            if (owner == null)
-            {
-                MessageBox.Show(text, "Готово!", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-            else
-            {
-                Window window = (Window)owner.GetRootElement();
-                MessageBox.Show(window, text, "Готово!", MessageBoxButton.OK, MessageBoxImage.Information);
+                    throw new ArgumentOutOfRangeException(nameof(value));
             }
         }
     }

@@ -1,4 +1,4 @@
-using System;
+п»їusing System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -25,9 +25,8 @@ namespace Pulse.UI
             if (TryAddZoneListing(listing, entry, entryPath))
                 return true;
 
-            // Списки имён файлов без возможности их извлучь
-            //if (TryAddSoundListing(listing, entry, entryName))
-            //    return true;
+            if (TryAddMoviesListing(listing, entry, entryName))
+                return true;
 
             if (TryAddImgbPair(listing, entry, entryPath, entryName))
                 return true;
@@ -119,11 +118,23 @@ namespace Pulse.UI
             if (!entryPath.StartsWith("zone/filelist"))
                 return false;
 
-            // Пропускаем пустые архивы
+            // Slip an empty archives
             if (entryPath.EndsWith("2"))
                 return false;
 
-            string binaryName = String.Format("white_{0}_img{1}.win32.bin", entryPath.Substring(14, 5), entryPath.EndsWith("2") ? "2" : string.Empty);
+            string binaryName;
+            switch (InteractionService.GamePart)
+            {
+                case FFXIIIGamePart.Part1:
+                    binaryName = $"white_{entryPath.Substring(14, 5)}_img{(entryPath.EndsWith("2") ? "2" : string.Empty)}.win32.bin";
+                    break;
+                case FFXIIIGamePart.Part2:
+                    binaryName = $"white_{entryPath.Substring(14, 6)}_img{(entryPath.EndsWith("2") ? "2" : string.Empty)}.win32.bin";
+                    break;
+                default:
+                    throw new NotSupportedException("InteractionService.GamePart");
+            }
+
             string binaryPath = Path.Combine(_areasDirectory, binaryName);
             if (!File.Exists(binaryPath))
                 return false;
@@ -135,20 +146,22 @@ namespace Pulse.UI
             return true;
         }
 
-        private bool TryAddSoundListing(ArchiveListing parentListing, ArchiveEntry entry, String entryName)
+        private bool TryAddMoviesListing(ArchiveListing parentListing, ArchiveEntry entry, String entryName)
         {
             switch (entryName)
             {
-                case "filelist_sound_pack.win32.bin":
-                case "filelist_sound_pack.win32_us.bin":
+                case "movie_items.win32.wdb":
+                case "movie_items_us.win32.wdb":
                     break;
                 default:
                     return false;
             }
 
-            ArchiveAccessor accessor = parentListing.Accessor.CreateDescriptor(entry);
-            ConcurrentBag<UiNode> container = ProvideRootNodeChilds(UiArchiveExtension.Bin);
-            container.Add(new UiArchiveNode(accessor, parentListing));
+            UiArchiveExtension extension = GetArchiveExtension(entry);
+
+            UiDataTableNode node = new UiDataTableNode(parentListing, extension, entry);
+            ConcurrentBag<UiNode> container = ProvideRootNodeChilds(extension);
+            container.Add(node);
 
             return true;
         }
@@ -161,7 +174,9 @@ namespace Pulse.UI
                 case ".win32.xfv":
                 case ".win32.xgr":
                 case ".win32.xwb":
+                    break;
                 case ".win32.trb":
+                    break;
                 case ".win32.imgb":
                     break;
                 default:
@@ -188,7 +203,7 @@ namespace Pulse.UI
             {
                 UiArchiveExtension extension = GetArchiveExtension(pair.Item1);
 
-                UiDataTableNode node = new UiDataTableNode(listing, extension, pair.Item1, pair.Item2);
+                UiFileTableNode node = new UiFileTableNode(listing, extension, pair.Item1, pair.Item2);
                 ConcurrentBag<UiNode> container = ProvideRootNodeChilds(extension);
                 container.Add(node);
             }
@@ -207,6 +222,9 @@ namespace Pulse.UI
 
         private bool IsUnexpectedEntry(string listingName, string longName)
         {
+            if (InteractionService.GamePart != FFXIIIGamePart.Part1)
+                return false;
+
             const string zoneFileListPrefix = @"zone/filelist_z";
             const string zoneBgLogPrefix = @"bg/loc";
 
